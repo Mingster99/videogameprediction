@@ -1,0 +1,623 @@
+---
+title: "Term paper video game"
+author: "Teo Ming Jun"
+date: "4/12/2023"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE,warning = FALSE,message = FALSE,out.width="120%",out.height = "120%")
+```
+
+merging dataset to have user scores as well as sales
+```{r}
+library(tidyverse)
+library(knitr)
+library(lubridate)
+library(httpuv)
+library(cluster)
+library(data.table)
+library(dplyr)
+library(ggplot2)
+library(corrplot)
+```
+
+```{r importing datasets}
+# Load the video game sales dataset
+vg_sales <- read.csv("vgsales.csv")
+
+# Load the Metacritic dataset
+metacritic <- read.csv("result.csv")
+
+# Rename the Name column in the Metacritic dataset to match the video game sales dataset
+names(metacritic)[2] <- "Name"
+names(metacritic)[3] <- "Platform"
+
+#convert platform names to lowercase to merge as problems arose where some platforms were missing
+
+metacritic$Platform = tolower(metacritic$Platform)
+vg_sales$Platform = tolower(vg_sales$Platform)
+
+# Merge the two datasets based on the Name column
+merged_data <- merge(vg_sales, metacritic, by = c("Name","Platform"), all.x = TRUE)
+
+# View the merged dataset
+head(merged_data)
+
+# Export the merged dataset to a CSV file
+#write.csv(merged_data, "merged_data.csv", row.names = FALSE)
+#eliminate all NA games
+#8503 missing data in users due to not having data in the merged dataset, can
+#still analyze sales using full dataset first, then remove missing user scores 
+
+#change NA values to null values
+
+
+#change to required units
+# Convert categorical variables to factors
+merged_data$Platform <- factor(merged_data$Platform)
+merged_data$Genre <- factor(merged_data$Genre)
+merged_data$Publisher <- factor(merged_data$Publisher)
+merged_data$metascore <- as.numeric(merged_data$metascore)
+merged_data$userscore <- as.numeric(merged_data$userscore)
+merged_data$Year <- as.numeric(merged_data$Year)
+
+merged_data = na.omit(merged_data)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r genre distribution}
+genre_counts <- table(merged_data$Genre)
+genre_counts_df <- as.data.frame(genre_counts)
+genre_counts_df
+
+genre_counts <- table(merged_data$Genre)
+
+genre_pie <- ggplot(data = data.frame(genre_counts), aes(x = "", y = Freq, fill = Var1)) +
+  geom_bar(stat = "identity", width = 1) +
+  coord_polar("y", start = 0) +
+  theme_void() +
+  ggtitle("Distribution of Video Game Genres") +
+  scale_fill_brewer(palette = "Set3", name = "Genre",
+                    guide_legend(label.position = "right", label.hjust = 1)) +
+  geom_text(aes(x = 1.5, y = cumsum(Freq) - 0.5*Freq, label = paste(Freq, " games")), 
+            size = 3, hjust = 1, color = "white")
+
+genre_pie
+
+```
+
+```{r publisher distribution}
+freq_published <- data.frame(cbind(Frequency = table(merged_data$Publisher), Percent = prop.table(table(merged_data$Publisher)) * 100))
+freq_published <- head(freq_published[order(freq_published$Frequency, decreasing = T), ], 20)
+freq_published
+
+ggplot(freq_published, aes(x=Frequency, y=reorder(rownames(freq_published), -Frequency), fill=Percent)) + 
+  geom_bar(stat="identity", show.legend = FALSE) +
+  scale_fill_gradientn(colors = rainbow(n = 20)) +
+  labs(title = "Top 20 Video Game Publishers by Frequency", x = "Frequency", y = "Publisher") +
+  theme_minimal()
+```
+
+```{r top 10 games}
+top_20_sales <- merged_data %>% 
+  arrange(desc(Global_Sales)) %>% 
+  head(20)
+
+print(top_20_sales)
+```
+
+```{r}
+# Melt the data into a long format for easier plotting
+melted_data <- reshape2::melt(merged_data,
+                              id.vars = c("Genre", "Platform"),
+                              measure.vars = c("NA_Sales", "EU_Sales", "JP_Sales", "Other_Sales"),
+                              variable.name = "Region",
+                              value.name = "Sales")
+
+# Calculate total sales by genre and region
+total_sales <- aggregate(Sales ~ Genre + Region, data = melted_data, sum)
+
+# Create a ggplot for each region
+ggplot() +
+  # Plot for North America
+  facet_wrap(~Region, ncol = 2) +
+  geom_bar(data = subset(total_sales, Region == "NA_Sales"),
+           aes(x = Genre, y = Sales, fill = Genre), stat = "identity") +
+  ggtitle("North America") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  xlab("") + ylab("Total Sales") +
+  # Plot for Europe
+  geom_bar(data = subset(total_sales, Region == "EU_Sales"),
+           aes(x = Genre, y = Sales, fill = Genre), stat = "identity") +
+  ggtitle("Europe") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  xlab("") + ylab("Total Sales") +
+  # Plot for Japan
+  geom_bar(data = subset(total_sales, Region == "JP_Sales"),
+           aes(x = Genre, y = Sales, fill = Genre), stat = "identity") +
+  ggtitle("Japan") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  xlab("") + ylab("Total Sales") +
+  # Plot for Other regions
+  geom_bar(data = subset(total_sales, Region == "Other_Sales"),
+           aes(x = Genre, y = Sales, fill = Genre), stat = "identity") +
+  ggtitle("Genre Popularity Among Regions") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  xlab("") + ylab("Total Sales")
+
+
+```
+
+
+```{r}
+#library(ggplot2)
+#ggplot(merged_data, aes(x = Year, y = Global_Sales)) + 
+#  geom_point() +
+#  labs(title = "Relationship Between Release Year and Global Sales",
+#       x = "Release Year", y = "Global Sales")
+
+#year_model <- lm(Global_Sales ~ Year, data = merged_data)
+
+# Check the model summary
+#summary(year_model)
+merged_data$Year <- as.numeric(merged_data$Year)
+# Load the ggplot2 library
+library(ggplot2)
+
+
+# Create a box plot of global sales by year
+ggplot(merged_data, aes(x = factor(Year), y = Global_Sales)) +
+  geom_boxplot() +
+  labs(title = "Global Sales by Release Year") +
+  xlab("Release Year") +
+  ylab("Global Sales")
+
+```
+
+
+```{r}
+#rank is correlated with sales, remove
+library(corrplot)
+merged_data$Year <- as.numeric(merged_data$Year)
+corr_data = subset(merged_data, select = -c(Name,date,Rank) )
+cols = c(1,3,4)
+corr_data = na.omit(corr_data)
+corr_data[,cols] = lapply(corr_data[,cols],factor)
+cor(corr_data[,-cols])
+corrplot(cor(corr_data[,-cols]), t1.pos='n')
+
+```
+Global Sales are correlated with NA_SALES, EU_SALES, JP_sales, and other sales, makes sense as they are dependatn on each other. Will train the model with each as response.
+
+```{r normalizing data for training}
+
+#normalizing the sales columns to lessen effects of outliers
+sales_cols = c("Global_Sales", "NA_Sales", "JP_Sales", "EU_Sales", "Other_Sales")
+
+#drop name and date columns for training
+normalized_data = subset(merged_data, select = -c(Name,date,Rank) )
+#divide metascore(critic) by 10
+normalized_data$metascore = merged_data$metascore /10
+
+normalized_data[,sales_cols] = scale(merged_data[,sales_cols])
+
+
+
+```
+
+
+
+```{r}
+#split training and test data 
+# Set the random seed for reproducibility
+set.seed(123)
+
+
+library(xgboost)
+# Train an XGBoost model
+
+
+# Split the data into training and test sets
+set.seed(123)
+train_idx <- sample(nrow(normalized_data), 0.7 * nrow(normalized_data))
+train_data <- normalized_data[train_idx, ]
+test_data <- normalized_data[-train_idx, ]
+
+# Convert data to a numeric matrix
+train_matrix <- model.matrix(Global_Sales ~ ., data = train_data)
+test_matrix <- model.matrix(Global_Sales ~ ., data = test_data)
+
+# Train an XGBoost model
+xgb_model <- xgboost(data = train_matrix,
+                     label = train_data$Global_Sales,
+                     nrounds = 100,
+                     objective = "reg:squarederror",
+                     eta = 0.1,
+                     max_depth = 6,
+                     subsample = 0.8,
+                     colsample_bytree = 0.8,
+                     eval_metric = "rmse",
+                     verbose = 0)
+
+# Make predictions on the test set
+test_pred <- predict(xgb_model, newdata = test_matrix)
+
+# Calculate the RMSE on the test set
+test_rmse <- sqrt(mean((test_data$Global_Sales - test_pred)^2))
+cat(sprintf("Test RMSE: %.3f\n", test_rmse))
+
+importance <- xgb.importance(model = xgb_model)
+print(importance)
+
+```
+
+```{r lasso}
+
+# Remove the Publisher feature from the dataset
+train_data <- train_data[, -4]
+test_data <- test_data[, -4]
+
+# Fit a multiple linear regression model without Publisher
+model <- lm(Global_Sales ~ ., data = train_data)
+
+# Make predictions on the test data
+predictions <- predict(model, newdata = test_data)
+
+# Calculate the test RMSE
+test_rmse <- sqrt(mean((test_data$Global_Sales - predictions)^2))
+
+# Print the coefficients and test RMSE
+summary(model)$coefficients
+cat("Test RMSE:", test_rmse)
+
+```
+
+```{r}
+global_train = subset(train_data, select = -c(NA_Sales,EU_Sales,JP_Sales,Other_Sales) )
+global_test = subset(test_data, select = -c(NA_Sales,EU_Sales,JP_Sales,Other_Sales) ) 
+
+na_train = subset(train_data, select = -c(Global_Sales,EU_Sales,JP_Sales,Other_Sales) )
+na_test = subset(test_data, select = -c(Global_Sales,EU_Sales,JP_Sales,Other_Sales) ) 
+
+eu_train = subset(train_data, select = -c(Global_Sales,NA_Sales,JP_Sales,Other_Sales) )
+eu_test = subset(test_data, select = -c(Global_Sales,NA_Sales,JP_Sales,Other_Sales) ) 
+
+jp_train = subset(train_data, select = -c(Global_Sales,NA_Sales,EU_Sales,Other_Sales) )
+jp_test = subset(test_data, select = -c(Global_Sales,NA_Sales,EU_Sales,Other_Sales) ) 
+
+other_train = subset(train_data, select = -c(Global_Sales,NA_Sales,EU_Sales,JP_Sales) )
+other_test = subset(test_data, select = -c(Global_Sales,NA_Sales,EU_Sales,JP_Sales) ) 
+```
+
+Different publishers would be more sellable in different regions, Japanese games will do better in JP, for eg.
+
+```{r global sales}
+# Convert data to a numeric matrix
+global_train_matrix <- model.matrix(Global_Sales ~ ., data = global_train)
+global_test_matrix <- model.matrix(Global_Sales ~ ., data = global_test)
+
+# Train an XGBoost model
+xgb_model <- xgboost(data = global_train_matrix,
+                     label = global_train$Global_Sales,
+                     nrounds = 100,
+                     objective = "reg:squarederror",
+                     eta = 0.1,
+                     max_depth = 6,
+                     subsample = 0.8,
+                     colsample_bytree = 0.8,
+                     eval_metric = "rmse",
+                     verbose = 0)
+
+# Make predictions on the test set
+test_pred <- predict(xgb_model, newdata = global_test_matrix)
+
+# Calculate the RMSE on the test set
+test_rmse <- sqrt(mean((global_test$Global_Sales - test_pred)^2))
+cat(sprintf("Test RMSE: %.3f\n", test_rmse))
+
+importance <- xgb.importance(model = xgb_model)
+print(importance)
+```
+
+take two games sold vs nintendo
+
+
+```{r na sales}
+# Convert data to a numeric matrix
+na_train_matrix <- model.matrix(NA_Sales ~ ., data = na_train)
+na_test_matrix <- model.matrix(NA_Sales ~ ., data = na_test)
+
+# Train an XGBoost model
+xgb_model <- xgboost(data = na_train_matrix,
+                     label = na_train$NA_Sales,
+                     nrounds = 100,
+                     objective = "reg:squarederror",
+                     eta = 0.1,
+                     max_depth = 6,
+                     subsample = 0.8,
+                     colsample_bytree = 0.8,
+                     eval_metric = "rmse",
+                     verbose = 0)
+
+# Make predictions on the test set
+test_pred <- predict(xgb_model, newdata = na_test_matrix)
+
+# Calculate the RMSE on the test set
+test_rmse <- sqrt(mean((na_test$NA_Sales - test_pred)^2))
+cat(sprintf("Test RMSE: %.3f\n", test_rmse))
+
+importance <- xgb.importance(model = xgb_model)
+print(importance)
+
+```
+
+```{r eu sales}
+# Convert data to a numeric matrix
+eu_train_matrix <- model.matrix(EU_Sales ~ ., data = eu_train)
+eu_test_matrix <- model.matrix(EU_Sales ~ ., data = eu_test)
+
+# Train an XGBoost model
+xgb_model <- xgboost(data = eu_train_matrix,
+                     label = eu_train$EU_Sales,
+                     nrounds = 100,
+                     objective = "reg:squarederror",
+                     eta = 0.1,
+                     max_depth = 6,
+                     subsample = 0.8,
+                     colsample_bytree = 0.8,
+                     eval_metric = "rmse",
+                     verbose = 0)
+
+# Make predictions on the test set
+test_pred <- predict(xgb_model, newdata = eu_test_matrix)
+
+# Calculate the RMSE on the test set
+test_rmse <- sqrt(mean((eu_test$EU_Sales - test_pred)^2))
+cat(sprintf("Test RMSE: %.3f\n", test_rmse))
+
+importance <- xgb.importance(model = xgb_model)
+print(importance)
+
+```
+
+
+```{r jp sales}
+# Convert data to a numeric matrix
+jp_train_matrix <- model.matrix(JP_Sales ~ ., data = jp_train)
+jp_test_matrix <- model.matrix(JP_Sales ~ ., data = jp_test)
+
+# Train an XGBoost model
+xgb_model <- xgboost(data = jp_train_matrix,
+                     label = jp_train$JP_Sales,
+                     nrounds = 100,
+                     objective = "reg:squarederror",
+                     eta = 0.1,
+                     max_depth = 6,
+                     subsample = 0.8,
+                     colsample_bytree = 0.8,
+                     eval_metric = "rmse",
+                     verbose = 0)
+
+# Make predictions on the test set
+test_pred <- predict(xgb_model, newdata = jp_test_matrix)
+
+# Calculate the RMSE on the test set
+test_rmse <- sqrt(mean((jp_test$JP_Sales - test_pred)^2))
+cat(sprintf("Test RMSE: %.3f\n", test_rmse))
+
+importance <- xgb.importance(model = xgb_model)
+print(importance)
+
+```
+
+```{r other sales}
+other_train_matrix <- model.matrix(Other_Sales ~ ., data = other_train)
+other_test_matrix <- model.matrix(Other_Sales ~ ., data = other_test)
+
+# Train an XGBoost model
+xgb_model <- xgboost(data = other_train_matrix,
+                     label = other_train$Other_Sales,
+                     nrounds = 100,
+                     objective = "reg:squarederror",
+                     eta = 0.1,
+                     max_depth = 6,
+                     subsample = 0.8,
+                     colsample_bytree = 0.8,
+                     eval_metric = "rmse",
+                     verbose = 0)
+
+# Make predictions on the test set
+test_pred <- predict(xgb_model, newdata = other_test_matrix)
+
+# Calculate the RMSE on the test set
+test_rmse <- sqrt(mean((other_test$Other_Sales - test_pred)^2))
+cat(sprintf("Test RMSE: %.3f\n", test_rmse))
+
+importance <- xgb.importance(model = xgb_model)
+print(importance)
+
+```
+
+
+linear regression to determine variation explained by publisher
+
+I will slightly favour the user scores as user scores may be more important in industries such as gaming, where the target audience is the general public.
+
+
+```{r}
+global_train$total_score <- global_train$userscore *0.6 + global_train$metascore *0.4
+
+global_test$total_score <- global_test$userscore *0.6 + global_test$metascore *0.4
+
+linear_model <- lm(Global_Sales ~ total_score, data = global_train)
+summary(linear_model)
+predictions <- predict(linear_model, newdata = global_test)
+RMSE <- sqrt(mean((predictions - global_test$Global_Sales)^2))
+
+cat(paste("RMSE:",RMSE))
+library(caret)
+varImp(linear_model)
+```
+
+```{r}
+linear_model <- lm(total_score ~ Global_Sales, data = global_train)
+summary(linear_model)
+predictions <- predict(linear_model, newdata = global_test)
+RMSE <- sqrt(mean((predictions - global_test$total_score)^2))
+
+cat(paste("RMSE:",RMSE))
+library(caret)
+varImp(linear_model)
+
+```
+
+
+To incorporate causal inference methods, you may want to use techniques such as propensity score matching, instrumental variable regression, or difference-in-differences analysis. These methods typically require additional data and assumptions, and may be beyond the scope of what can be implemented within the context of this code snippet. It is recommended that you consult with a statistician or data scientist with expertise in causal inference methods if you are interested in pursuing this type of analysis.
+
+As a language model, I don't have personal expertise in any specific field. However, I can provide some general guidance on how you might extend the code to include causal inference methods.
+
+Causal inference is a broad topic that encompasses several different techniques, including regression adjustment, propensity score matching, and instrumental variable analysis. Each method has its own strengths and limitations, and the choice of method will depend on the specific research question and data available.
+
+One possible way to extend the code would be to use propensity score matching to estimate the causal effect of ratings on sales. Propensity score matching involves creating a pseudo-population in which the distribution of confounding variables is balanced between the treatment and control groups. In this case, the treatment group would be games with high ratings, and the control group would be games with low ratings. After balancing the distribution of confounding variables, you can estimate the causal effect of ratings on sales using a regression model.
+
+
+SUBSET GLOBAL DATA INSTEAD OF GLOBAL TRAIN
+```{r rating to sales}
+library(MatchIt)
+library(dplyr)
+global_data = subset(merged_data, select = -c(NA_Sales,EU_Sales,JP_Sales,Other_Sales) )
+
+global_data$metascore = global_data$metascore /10
+global_data$total_score <- global_data$userscore *0.6 + global_data$metascore *0.4
+
+# Create binary variable for high/low ratings
+global_data <- global_data %>%
+  mutate(high_rating = ifelse(total_score > 7.0, 1, 0))
+
+# Create propensity score model
+ps_model <- glm(high_rating ~ total_score + Publisher + Year , data = global_data, family = binomial)
+#exclude platform, Genre,
+
+# Estimate propensity scores
+global_data$propensity_score <- predict(ps_model, type = "response")
+
+# Match treatment and control groups on propensity score
+matched_data <- matchit(high_rating ~ propensity_score, data = global_data, method = "nearest", distance = "logit")
+
+# Create matched dataset
+matched_data <- match.data(matched_data)
+
+# Fit linear regression model
+causal_model <- lm(Global_Sales ~ high_rating + Publisher + Year , data = matched_data)
+summary(causal_model)
+
+# Estimate causal effect
+causal_effect <- coef(causal_model)["high_rating"]
+causal_effect
+
+unscaled_effect = (max(merged_data$Global_Sales) - min(merged_data$Global_Sales)) * causal_effect + min(merged_data$Global_Sales)
+
+unscaled_effect
+```
+
+An estimated causal effect of "high_rating" of 0.2245789 means that, on average, games with a high rating (metascore greater than 75) had global sales that were 0.2245789 units higher than games with a low rating (metascore less than or equal 
+
+6.6 million
+
+hits are more than 1 million sales
+how to unnormalize 
+
+
+```{r propensity sales to rating}
+#find 70th quantile of sales
+quantile(merged_data$Global_Sales,0.65)
+
+# Create binary variable for high/low ratings
+global_data <- global_data %>%
+  mutate(high_sales = ifelse(global_data$Global_Sales >  1, 1, 0))
+
+#0.0592315
+# Create propensity score model
+ps_model <- glm(high_sales ~ Global_Sales + Publisher + Year, data = global_data, family = binomial)
+#exclude platform, Genre,
+
+# Estimate propensity scores
+global_data$propensity_score <- predict(ps_model, type = "response")
+
+# Match treatment and control groups on propensity score
+matched_data <- matchit(high_sales ~ propensity_score, data = global_data, method = "nearest", distance = "logit")
+
+# Create matched dataset
+matched_data <- match.data(matched_data)
+
+# Fit linear regression model
+causal_model <- lm(total_score ~ high_sales + Publisher + Year, data = matched_data)
+summary(causal_model)
+
+# Estimate causal effect
+causal_effect <- coef(causal_model)["high_sales"]
+causal_effect
+
+
+```
+
+K means clustering for the impact of publishers on sales.
+```{r 3rd question}
+ #Load required libraries
+library(dplyr)
+library(tidyr)
+library(factoextra)
+library(cluster)
+
+# Select necessary columns and remove missing values
+cluster_data <- global_data %>% select(Publisher, Global_Sales, Year, Genre) %>% na.omit()
+
+# Create a pivot table to calculate total sales by publisher
+sales_by_publisher <- cluster_data %>% group_by(Publisher) %>% summarise(total_sales = sum(Global_Sales))
+
+# Convert the sales_by_publisher data to a matrix
+sales_matrix <- as.matrix(sales_by_publisher[,2])
+
+# Determine the optimal number of clusters using the elbow method
+elbow_plot <- fviz_nbclust(sales_matrix, kmeans, method = "wss") + labs(title = "Elbow Plot")
+
+elbow_plot
+# Select the optimal number of clusters based on the elbow plot
+num_clusters <- 5
+
+# Perform k-means clustering
+set.seed(123)
+kmeans_model <- kmeans(sales_matrix, centers = num_clusters, nstart = 25)
+
+# Add the cluster labels to the sales_by_publisher data
+sales_by_publisher$cluster <- as.factor(kmeans_model$cluster)
+
+# View the results
+print(sales_by_publisher)
+
+library(ggplot2)
+
+# Create a bar plot showing total sales by publisher and cluster
+ggplot(sales_by_publisher, aes(x = Publisher, y = total_sales, fill = cluster)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Total Sales by Publisher and Cluster",
+       x = "Publisher", y = "Total Sales",
+       fill = "Cluster") +
+  theme(legend.position = "top")
+
+# Assuming "sales_by_publisher" is the data frame with cluster labels assigned to each publisher
+
+# Group the data by cluster and select the top 10 publishers with the highest total sales in each cluster
+top_publishers <- sales_by_publisher %>%
+  group_by(cluster) %>%
+  top_n(3, total_sales) %>%
+  arrange(cluster, desc(total_sales))
+
+# Print the top publishers for each cluster
+print(top_publishers)
+
+```
